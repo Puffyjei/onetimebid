@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#000">
+  <title>Visualización privada</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;
+    font-family:system-ui,-apple-system,Segoe UI,sans-serif;overflow:hidden}
+    body{display:grid;place-items:center}
+    main{position:fixed;inset:0;display:grid;place-items:center;background:#000;padding:24px;text-align:center}
+    h1{font-size:clamp(25px,4vw,38px);margin:0 0 12px}p{color:#aaa;max-width:540px;line-height:1.55;margin:0 0 24px}
+    button{background:#fff;color:#000;border:0;border-radius:8px;padding:14px 24px;font-size:16px;font-weight:700;cursor:pointer}
+    #player{display:none;position:fixed;inset:0;background:#000}
+    video{width:100%;height:100%;object-fit:contain;background:#000}
+    #blackout{display:none;position:fixed;inset:0;background:#000;z-index:5}
+    .small{font-size:12px;color:#666;margin-top:18px}
+  </style>
+</head>
+<body>
+  <main id="gate">
+    <div>
+      <h1>Visualización privada</h1>
+      <p>Este vídeo solo se puede iniciar una vez en total. Cuando comience, no podrás pausarlo ni cambiar de posición.</p>
+      <button id="start">Ver vídeo</button>
+      <div class="small">El acceso se consume al pulsar el botón.</div>
+    </div>
+  </main>
+  <section id="player">
+    <video id="video" playsinline preload="auto"
+      controlslist="nodownload noplaybackrate noremoteplayback"
+      disablepictureinpicture></video>
+  </section>
+  <div id="blackout"></div>
+  <main id="ended" style="display:none">
+    <div><h1>Visualización finalizada</h1><p>Este acceso ya ha sido utilizado y no se puede volver a abrir.</p></div>
+  </main>
+  <script>
+    const gate=document.getElementById('gate');
+    const player=document.getElementById('player');
+    const video=document.getElementById('video');
+    const ended=document.getElementById('ended');
+    const blackout=document.getElementById('blackout');
+    const start=document.getElementById('start');
+    let started=false, lastTime=0;
+
+    function finish(){
+      video.pause(); video.muted=true;
+      player.style.display='none'; blackout.style.display='none';
+      gate.style.display='none'; ended.style.display='grid';
+    }
+    start.addEventListener('click', async ()=>{
+      if(started) return;
+      started=true; start.disabled=true; start.textContent='Comprobando acceso…';
+      try {
+        const token=Array.from(crypto.getRandomValues(new Uint8Array(32)))
+          .map(x=>x.toString(16).padStart(2,'0')).join('');
+        const response=await fetch('/api/watch',{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({token})
+        });
+        const data=await response.json();
+        if(!response.ok || !data.url) throw new Error(data.error||'Acceso no disponible');
+        gate.style.display='none'; player.style.display='block';
+        video.src=data.url; video.controls=false; video.muted=false;
+        await video.play();
+      } catch(e) {
+        gate.style.display='none';
+        ended.querySelector('h1').textContent='Acceso no disponible';
+        ended.querySelector('p').textContent=e.message||'Este vídeo ya no está disponible.';
+        ended.style.display='grid';
+      }
+    },{once:true});
+
+    video.addEventListener('timeupdate',()=>{lastTime=video.currentTime;});
+    video.addEventListener('seeking',()=>{video.currentTime=lastTime;});
+    video.addEventListener('pause',()=>{
+      if(!video.ended && player.style.display==='block') video.play().catch(finish);
+    });
+    video.addEventListener('ended',finish);
+    video.addEventListener('error',()=>{
+      if(started) finish();
+    });
+    document.addEventListener('keydown',e=>{
+      if(player.style.display==='block' && [' ','ArrowLeft','ArrowRight','Home','End'].includes(e.key)) e.preventDefault();
+    });
+    document.addEventListener('contextmenu',e=>e.preventDefault());
+    document.addEventListener('visibilitychange',()=>{
+      if(player.style.display!=='block') return;
+      if(document.hidden){video.muted=true;blackout.style.display='block';}
+      else if(!video.ended){blackout.style.display='none';video.muted=false;}
+    });
+  </script>
+</body>
+</html>
